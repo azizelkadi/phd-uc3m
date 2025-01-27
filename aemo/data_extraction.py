@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import requests
+from retry import retry
 
 
 # Load AEMO data into a parquet table
@@ -65,3 +67,19 @@ def build_offer_supply_curves(data):
             }
 
     return supply_demand_curves
+
+
+@retry(tries=2, delay=2)
+def fetch_weather_data(lat, lon, start_date, end_date):
+    url = "https://archive-api.open-meteo.com/v1/archive"
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start_date,
+        "end_date": end_date,
+        "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "daylight_duration", "precipitation_sum", "precipitation_hours", "wind_speed_10m_max", "shortwave_radiation_sum"],
+        "timezone": "Australia/Sydney",
+    }
+    response = requests.get(url, params=params)
+    return response.json()
