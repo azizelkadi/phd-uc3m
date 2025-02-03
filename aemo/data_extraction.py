@@ -46,16 +46,30 @@ def build_offer_supply_curves(data):
 
             # Separate offers and bids
             offers = data_interval[data_interval["Bid or Offer"] == "Offer"].sort_values("Price ($/MWh)").copy()
-            bids = data_interval[data_interval["Bid or Offer"] == "Bid"].sort_values("Price ($/MWh)", ascending=False).copy()
+            bids = (
+                data_interval[data_interval["Bid or Offer"] == "Bid"]
+                .sort_values("Price ($/MWh)", ascending=False)
+                .copy()
+            )
 
             # Calculate cumulative quantity for both offers and bids
             offers["cumulative_quantity"] = offers["Quantity (MWh)"].cumsum()
             bids["cumulative_quantity"] = bids["Quantity (MWh)"].cumsum()
 
             # Discretización
-            offers = pd.concat([offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(), offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max()]).sort_values(["Price ($/MWh)", "cumulative_quantity"])
+            offers = pd.concat(
+                [
+                    offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(),
+                    offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max(),
+                ]
+            ).sort_values(["Price ($/MWh)", "cumulative_quantity"])
 
-            bids = pd.concat([bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(), bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max()]).sort_values(["Price ($/MWh)", "cumulative_quantity"], ascending=False)
+            bids = pd.concat(
+                [
+                    bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(),
+                    bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max(),
+                ]
+            ).sort_values(["Price ($/MWh)", "cumulative_quantity"], ascending=False)
 
             # Get curves values
             supply_curve = offers[["cumulative_quantity", "Price ($/MWh)"]].values
@@ -69,7 +83,7 @@ def build_offer_supply_curves(data):
     return supply_demand_curves
 
 
-@retry(tries=2, delay=2)
+@retry(tries=3, delay=1)
 def fetch_weather_data(lat, lon, start_date, end_date):
     url = "https://archive-api.open-meteo.com/v1/archive"
 
@@ -78,7 +92,16 @@ def fetch_weather_data(lat, lon, start_date, end_date):
         "longitude": lon,
         "start_date": start_date,
         "end_date": end_date,
-        "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "daylight_duration", "precipitation_sum", "precipitation_hours", "wind_speed_10m_max", "shortwave_radiation_sum"],
+        "daily": [
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "temperature_2m_mean",
+            "daylight_duration",
+            "precipitation_sum",
+            "wind_speed_10m_max",
+            "shortwave_radiation_sum",
+        ],
         "timezone": "Australia/Sydney",
     }
     response = requests.get(url, params=params)
