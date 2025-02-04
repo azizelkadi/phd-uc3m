@@ -33,26 +33,6 @@ def plot_offer_supply_curves(supply_curve, demand_curve):
     plt.show()
 
 
-def find_intersection(curve1, curve2):
-    x1, y1 = zip(*curve1)
-    x2, y2 = zip(*curve2)
-
-    # Define the search grid with a step of 0.1
-    x_min = min(min(x1), min(x2))
-    x_max = max(max(x1), max(x2))
-    x_grid = np.arange(x_min, x_max, 0.1)
-
-    # Interpolate both curves
-    y1_interp = np.interp(x_grid, x1, y1)
-    y2_interp = np.interp(x_grid, x2, y2)
-
-    # Calculate distances and find minimum
-    distances = np.abs(y1_interp - y2_interp)
-    min_idx = np.argmin(distances)
-
-    return x_grid[min_idx], y1_interp[min_idx]
-
-
 def wasserstein_distance(curve1, curve2, plot=False):
     x1, y1 = curve1[:, 0], curve1[:, 1]
     x2, y2 = curve2[:, 0], curve2[:, 1]

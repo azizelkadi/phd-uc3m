@@ -30,14 +30,34 @@ def load_data(input_path_format, parquet_output_path, years, months):
     return data
 
 
-# Build offer and supply curves
-def build_offer_supply_curves(data):
-    supply_demand_curves = {}
+def find_intersection(curve1, curve2):
+    x1, y1 = zip(*curve1)
+    x2, y2 = zip(*curve2)
+
+    # Define the search grid with a step of 0.3
+    x_min = min(min(x1), min(x2))
+    x_max = max(max(x1), max(x2))
+    x_grid = np.arange(x_min, x_max, 0.5)
+
+    # Interpolate both curves
+    y1_interp = np.interp(x_grid, x1, y1)
+    y2_interp = np.interp(x_grid, x2, y2)
+
+    # Calculate distances and find minimum
+    distances = np.abs(y1_interp - y2_interp)
+    min_idx = np.argmin(distances)
+
+    return x_grid[min_idx], y1_interp[min_idx]
+
+
+# Build demand and supply curves
+def build_supply_demand_curves(data):
+    supply_curves = []
+    demand_curves = []
 
     for day in np.sort(data["Trading Date"].unique()):
 
         daily_data = data[data["Trading Date"] == day].copy()
-        supply_demand_curves[day] = {}
 
         for interval in np.sort(data["Interval Number"].unique()):
 
@@ -56,31 +76,51 @@ def build_offer_supply_curves(data):
             offers["cumulative_quantity"] = offers["Quantity (MWh)"].cumsum()
             bids["cumulative_quantity"] = bids["Quantity (MWh)"].cumsum()
 
-            # Discretización
+            # Discretizacion
             offers = pd.concat(
                 [
                     offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(),
                     offers.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max(),
                 ]
-            ).sort_values(["Price ($/MWh)", "cumulative_quantity"])
+            ).sort_values(["cumulative_quantity", "Price ($/MWh)"])
 
             bids = pd.concat(
                 [
                     bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].min(),
                     bids.groupby("Price ($/MWh)", as_index=False)["cumulative_quantity"].max(),
                 ]
-            ).sort_values(["Price ($/MWh)", "cumulative_quantity"], ascending=False)
+            ).sort_values(["cumulative_quantity", "Price ($/MWh)"])
 
             # Get curves values
-            supply_curve = offers[["cumulative_quantity", "Price ($/MWh)"]].values
-            demand_curve = bids[["cumulative_quantity", "Price ($/MWh)"]].values
+            raw_supply_curve = offers[["cumulative_quantity", "Price ($/MWh)"]].values
+            raw_demand_curve = bids[["cumulative_quantity", "Price ($/MWh)"]].values
 
-            supply_demand_curves[day][interval] = {
-                "supply_curve": supply_curve,
-                "demand_curve": demand_curve,
-            }
+            # Compute cross point
+            cross_point = find_intersection(raw_supply_curve, raw_demand_curve)
 
-    return supply_demand_curves
+            # Append results
+            supply_curves.append(
+                {
+                    "day": day,
+                    "interval": interval,
+                    "raw_curve": raw_supply_curve,
+                    "cross_point": cross_point,
+                }
+            )
+
+            demand_curves.append(
+                {
+                    "day": day,
+                    "interval": interval,
+                    "raw_curve": raw_demand_curve,
+                    "cross_point": cross_point,
+                }
+            )
+
+    supply_curves = pd.DataFrame(supply_curves)
+    demand_curves = pd.DataFrame(demand_curves)
+
+    return supply_curves, demand_curves
 
 
 @retry(tries=3, delay=1)
