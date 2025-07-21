@@ -1,53 +1,8 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 import requests
 from retry import retry
-
-
-# Load AEMO data into a parquet table
-def load_data(input_path_format, parquet_output_path, years, months):
-    # Loop through each year and month
-    for year in years:
-        for month in months:
-            formatted_data_path = input_path_format.format(year=year, month=month)
-            print(f"Processing file: {year}-{month}")
-
-            interval_data = pd.read_csv(formatted_data_path)
-
-            interval_data["year"] = year
-            interval_data["month"] = int(month)
-
-            try:
-                data = pd.concat([data, interval_data], ignore_index=True)
-
-            except:
-                data = interval_data
-
-            print(f"Data for {year}-{month} loaded successfully.")
-
-    data.to_parquet(parquet_output_path, partition_cols=["year", "month"], engine="pyarrow", index=False)
-    return data
-
-
-def find_intersection(curve1, curve2):
-    x1, y1 = zip(*curve1)
-    x2, y2 = zip(*curve2)
-
-    # Define the search grid with a step of 0.3
-    x_min = min(min(x1), min(x2))
-    x_max = max(max(x1), max(x2))
-    x_grid = np.arange(x_min, x_max, 0.5)
-
-    # Interpolate both curves
-    y1_interp = np.interp(x_grid, x1, y1)
-    y2_interp = np.interp(x_grid, x2, y2)
-
-    # Calculate distances and find minimum
-    distances = np.abs(y1_interp - y2_interp)
-    min_idx = np.argmin(distances)
-
-    return x_grid[min_idx], y1_interp[min_idx]
+from concurrent.futures import ThreadPoolExecutor
 
 
 # Build demand and supply curves
@@ -92,8 +47,8 @@ def build_supply_demand_curves(data):
             ).sort_values(["cumulative_quantity", "Price ($/MWh)"])
 
             # Get curves values
-            raw_supply_curve = offers[["cumulative_quantity", "Price ($/MWh)"]].values
-            raw_demand_curve = bids[["cumulative_quantity", "Price ($/MWh)"]].values
+            raw_supply_curve = np.round(offers[["cumulative_quantity", "Price ($/MWh)"]].values, 4).tolist()
+            raw_demand_curve = np.round(bids[["cumulative_quantity", "Price ($/MWh)"]].values, 4).tolist()
 
             # Compute cross point
             cross_point = find_intersection(raw_supply_curve, raw_demand_curve)
@@ -121,6 +76,59 @@ def build_supply_demand_curves(data):
     demand_curves = pd.DataFrame(demand_curves)
 
     return supply_curves, demand_curves
+
+
+# Load AEMO data into a parquet table
+def load_data(input_path_format, root_path, years, months):
+
+    # Load each month data
+    def load_month_data(date):
+        year, month = date
+        formatted_data_path = input_path_format.format(year=year, month=month)
+
+        interval_data = pd.read_csv(formatted_data_path, low_memory=False)
+        interval_data["year"] = year
+        interval_data["month"] = int(month)
+        supply_curves, demand_curves = build_supply_demand_curves(interval_data)
+
+        return supply_curves, demand_curves
+
+    # Loop through each year and month
+    for year in years:
+        with ThreadPoolExecutor() as executor:
+            dates = [(year, m) for m in months]
+            year_results = list(executor.map(load_month_data, dates))
+
+        supply_curves_union = pd.concat([r[0] for r in year_results])
+        demand_curves_union = pd.concat([r[1] for r in year_results])
+
+        supply_output_path = root_path + rf"\aemo\data\processed\supply_curves_{year}.csv"
+        demand_output_path = root_path + rf"\aemo\data\processed\demand_curves_{year}.csv"
+
+        supply_curves_union.to_csv(supply_output_path, index=False)
+        demand_curves_union.to_csv(demand_output_path, index=False)
+
+        print(f"Data for {year} loaded successfully.")
+
+
+def find_intersection(curve1, curve2):
+    x1, y1 = zip(*curve1)
+    x2, y2 = zip(*curve2)
+
+    # Define the search grid with a step of 0.5
+    x_min = min(min(x1), min(x2))
+    x_max = max(max(x1), max(x2))
+    x_grid = np.arange(x_min, x_max, 0.5)
+
+    # Interpolate both curves
+    y1_interp = np.interp(x_grid, x1, y1)
+    y2_interp = np.interp(x_grid, x2, y2)
+
+    # Calculate distances and find minimum
+    distances = np.abs(y1_interp - y2_interp)
+    min_idx = np.argmin(distances)
+
+    return round(x_grid[min_idx], 4), round(y1_interp[min_idx], 4)
 
 
 @retry(tries=3, delay=1)
